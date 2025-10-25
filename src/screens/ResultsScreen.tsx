@@ -32,6 +32,125 @@ const CheckCircleIcon = () => (
   </Svg>
 );
 
+const ErrorIcon = () => (
+  <Svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FF5050" strokeWidth="2">
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" y1="8" x2="12" y2="12" />
+    <line x1="12" y1="16" x2="12.01" y2="16" />
+  </Svg>
+);
+
+/**
+ * ImagePlaceholder - Placeholder for failed image loads
+ */
+const ImagePlaceholder = ({ onRetry }: { onRetry?: () => void }) => (
+  <View style={styles.placeholderContainer}>
+    <ErrorIcon />
+    <Text style={styles.placeholderText}>Failed to load image</Text>
+    {onRetry && (
+      <TouchableOpacity style={styles.retryButton} onPress={onRetry}>
+        <Text style={styles.retryButtonText}>Retry</Text>
+      </TouchableOpacity>
+    )}
+  </View>
+);
+
+/**
+ * ImageItem - Individual image item with error handling
+ */
+const ImageItem = ({
+  result,
+  onViewImage,
+  onDownload,
+  downloading,
+}: {
+  result: any;
+  onViewImage: (uri: string) => void;
+  onDownload: (uri: string) => void;
+  downloading: string | null;
+}) => {
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const handleRetry = () => {
+    setImageError(false);
+    setImageLoaded(false);
+    setRetryCount((prev) => prev + 1);
+  };
+
+  return (
+    <View style={styles.gridItem}>
+      <TouchableOpacity
+        style={styles.imageContainer}
+        onPress={() => imageLoaded && onViewImage(result.imageUri)}
+        disabled={imageError || !imageLoaded}
+      >
+        {!imageLoaded && !imageError && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator color="#0A76AF" size="large" />
+          </View>
+        )}
+
+        {imageError ? (
+          <ImagePlaceholder onRetry={handleRetry} />
+        ) : (
+          <>
+            <Image
+              key={`${result.id}-${retryCount}`}
+              source={{ uri: result.imageUri }}
+              style={styles.image}
+              resizeMode="cover"
+              onLoad={() => setImageLoaded(true)}
+              onError={() => {
+                console.error('Image load error:', result.imageUri);
+                setImageError(true);
+              }}
+            />
+            {imageLoaded && (
+              <View style={styles.imageOverlay}>
+                <EyeIcon />
+              </View>
+            )}
+          </>
+        )}
+      </TouchableOpacity>
+
+      {/* Action Buttons */}
+      <View style={styles.actions}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => imageLoaded && onViewImage(result.imageUri)}
+          disabled={imageError || !imageLoaded}
+        >
+          <EyeIcon />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.actionButton,
+            downloading === result.imageUri && styles.actionButtonActive,
+          ]}
+          onPress={() => onDownload(result.imageUri)}
+          disabled={downloading === result.imageUri || imageError || !imageLoaded}
+        >
+          {downloading === result.imageUri ? (
+            <ActivityIndicator color="#0A76AF" size="small" />
+          ) : (
+            <DownloadIcon />
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* Success Indicator */}
+      {imageLoaded && !imageError && (
+        <View style={styles.successIndicator}>
+          <CheckCircleIcon />
+        </View>
+      )}
+    </View>
+  );
+};
+
 /**
  * ResultsScreen - Display generation results in a grid
  */
@@ -115,54 +234,24 @@ export default function ResultsScreen() {
         )}
 
         {/* Results Grid */}
-        <View style={styles.grid}>
-          {results.map((result, index) => (
-            <View key={result.id} style={styles.gridItem}>
-              <TouchableOpacity
-                style={styles.imageContainer}
-                onPress={() => handleViewImage(result.imageUri)}
-              >
-                <Image
-                  source={{ uri: result.imageUri }}
-                  style={styles.image}
-                  resizeMode="cover"
-                />
-                <View style={styles.imageOverlay}>
-                  <EyeIcon />
-                </View>
-              </TouchableOpacity>
-
-              {/* Action Buttons */}
-              <View style={styles.actions}>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => handleViewImage(result.imageUri)}
-                >
-                  <EyeIcon />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.actionButton,
-                    downloading === result.imageUri && styles.actionButtonActive,
-                  ]}
-                  onPress={() => handleDownload(result.imageUri)}
-                  disabled={downloading === result.imageUri}
-                >
-                  {downloading === result.imageUri ? (
-                    <ActivityIndicator color="#0A76AF" size="small" />
-                  ) : (
-                    <DownloadIcon />
-                  )}
-                </TouchableOpacity>
-              </View>
-
-              {/* Success Indicator */}
-              <View style={styles.successIndicator}>
-                <CheckCircleIcon />
-              </View>
-            </View>
-          ))}
-        </View>
+        {results.length > 0 ? (
+          <View style={styles.grid}>
+            {results.map((result) => (
+              <ImageItem
+                key={result.id}
+                result={result}
+                onViewImage={handleViewImage}
+                onDownload={handleDownload}
+                downloading={downloading}
+              />
+            ))}
+          </View>
+        ) : (
+          <GlassPanel style={styles.emptyPanel}>
+            <ActivityIndicator color="#0A76AF" size="large" />
+            <Text style={styles.emptyText}>Generating images...</Text>
+          </GlassPanel>
+        )}
       </ScrollView>
 
       {/* Image Modal */}
@@ -273,10 +362,42 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 8,
     position: 'relative',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
   image: {
     width: '100%',
     height: '100%',
+  },
+  loadingContainer: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderContainer: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 80, 80, 0.1)',
+  },
+  placeholderText: {
+    color: '#FF5050',
+    fontSize: 12,
+    marginTop: 8,
+    fontWeight: '500',
+  },
+  retryButton: {
+    marginTop: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255, 80, 80, 0.2)',
+    borderRadius: 6,
+  },
+  retryButtonText: {
+    color: '#FF5050',
+    fontSize: 12,
+    fontWeight: '600',
   },
   imageOverlay: {
     position: 'absolute',
@@ -287,7 +408,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
     justifyContent: 'center',
     alignItems: 'center',
-    opacity: 0,
   },
   actions: {
     flexDirection: 'row',
