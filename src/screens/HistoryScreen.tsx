@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import Svg, { Path, Polyline, Line, Rect } from 'react-native-svg';
 import GlassyTitle from '../components/GlassyTitle';
 import GlassPanel from '../components/GlassPanel';
 import { glassStyles, COLORS } from '../styles/glassStyles';
+import { useAuthStore } from '../store/authStore';
+import { generationService } from '../services/generationService';
 
 // Icons
 const GridIcon = () => (
@@ -33,180 +36,188 @@ const TrashIcon = () => (
   </Svg>
 );
 
-interface Generation {
+interface HistoryItem {
   id: string;
-  imageUrls: string[];
-  prompt: string;
-  style: string | null;
-  aspectRatio: string;
-  createdAt: string;
+  date: string;
+  time: string;
+  count: number;
+  thumbnail: string;
+  results: string[];
 }
 
 /**
  * HistoryScreen - Display user's generation history
  */
 export default function HistoryScreen() {
-  const [history, setHistory] = useState<Generation[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const user = useAuthStore((state) => state.user);
 
-  // Mock data for demonstration
-  const mockHistory: Generation[] = [
-    {
-      id: '1',
-      imageUrls: [
-        'https://via.placeholder.com/300x400/002857/FFFFFF?text=Gen+1-1',
-        'https://via.placeholder.com/300x400/004b93/FFFFFF?text=Gen+1-2',
-        'https://via.placeholder.com/300x400/002857/FFFFFF?text=Gen+1-3',
-        'https://via.placeholder.com/300x400/004b93/FFFFFF?text=Gen+1-4',
-      ],
-      prompt: 'Fashion photoshoot in urban setting',
-      style: 'Urban',
-      aspectRatio: 'portrait',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: '2',
-      imageUrls: [
-        'https://via.placeholder.com/300x400/002857/FFFFFF?text=Gen+2-1',
-        'https://via.placeholder.com/300x400/004b93/FFFFFF?text=Gen+2-2',
-      ],
-      prompt: 'Professional studio fashion shoot',
-      style: 'Studio',
-      aspectRatio: 'portrait',
-      createdAt: new Date(Date.now() - 86400000).toISOString(),
-    },
-  ];
+  // Load history when screen is focused
+  useFocusEffect(
+    React.useCallback(() => {
+      loadHistory();
+    }, [user])
+  );
 
-  useEffect(() => {
-    // TODO: Check authentication status
-    setIsAuthenticated(true);
-    
-    // TODO: Fetch history from API
-    setTimeout(() => {
-      setHistory(mockHistory);
+  // Load history from backend
+  const loadHistory = async () => {
+    if (!user) {
       setLoading(false);
-    }, 1000);
-  }, []);
+      return;
+    }
 
-  const handleDelete = (generationId: string) => {
+    try {
+      setLoading(true);
+      const data = await generationService.getHistory(user.id);
+      setHistory(data || []);
+    } catch (error) {
+      console.error('Error loading history:', error);
+      Alert.alert('Error', 'Failed to load history');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle delete history item
+  const handleDelete = async (historyId: string) => {
     Alert.alert(
       'Delete Generation',
       'Are you sure you want to delete this generation?',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Cancel', onPress: () => {}, style: 'cancel' },
         {
           text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            setHistory(history.filter((gen) => gen.id !== generationId));
+          onPress: async () => {
+            try {
+              setDeleting(historyId);
+              await generationService.deleteHistory(historyId);
+              setHistory((prev) => prev.filter((item) => item.id !== historyId));
+              Alert.alert('Success', 'Generation deleted successfully');
+            } catch (error: any) {
+              Alert.alert('Error', error.message || 'Failed to delete generation');
+            } finally {
+              setDeleting(null);
+            }
           },
+          style: 'destructive',
         },
       ]
     );
   };
 
-  const handleDownload = (imageUrl: string) => {
-    // TODO: Implement download functionality
-    console.log('Download:', imageUrl);
+  // Handle download
+  const handleDownload = async (imageUri: string) => {
+    try {
+      await generationService.downloadImage(imageUri, `fashion-muse-${Date.now()}.jpg`);
+      Alert.alert('Success', 'Image downloaded successfully');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to download image');
+    }
   };
 
+  // Loading state
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={glassStyles.screenContent}>
-          <GlassyTitle>History</GlassyTitle>
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={COLORS.silverMid} />
-          </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator color="#0A76AF" size="large" />
+          <Text style={styles.loadingText}>Loading history...</Text>
         </View>
       </SafeAreaView>
     );
   }
 
-  if (!isAuthenticated) {
+  // Empty state
+  if (history.length === 0) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={glassStyles.screenContent}>
-          <GlassyTitle>History</GlassyTitle>
-          <GlassPanel style={styles.messagePanel} radius={20}>
-            <Text style={styles.messageText}>
-              Please sign in to view your generation history.
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <GlassyTitle title="History" />
+            <Text style={styles.subtitle}>Your generation history</Text>
+          </View>
+
+          <GlassPanel style={styles.emptyPanel}>
+            <Text style={styles.emptyText}>No generations yet</Text>
+            <Text style={styles.emptySubtext}>
+              Go to Home and create your first fashion photo
             </Text>
           </GlassPanel>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={glassStyles.screenContent}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <GlassyTitle>History</GlassyTitle>
-        
-        {error && (
-          <GlassPanel style={styles.errorPanel} radius={20}>
-            <Text style={styles.errorText}>{error}</Text>
-          </GlassPanel>
-        )}
-        
-        {history.length === 0 ? (
-          <GlassPanel style={styles.messagePanel} radius={20}>
-            <Text style={styles.messageText}>No generations found.</Text>
-          </GlassPanel>
-        ) : (
-          <View style={styles.historyList}>
-            {history.map((generation) => (
-              <GlassPanel key={generation.id} style={styles.generationCard} radius={24}>
-                <View style={styles.imageGrid}>
-                  {generation.imageUrls.map((url, index) => (
-                    <View key={index} style={styles.imageGridItem}>
-                      <Image
-                        source={{ uri: url }}
-                        style={styles.historyImage}
-                        resizeMode="cover"
-                      />
-                      <View style={styles.imageOverlay}>
-                        <TouchableOpacity
-                          style={styles.imageButton}
-                          onPress={() => {}}
-                        >
-                          <GridIcon />
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.imageButton}
-                          onPress={() => handleDownload(url)}
-                        >
-                          <DownloadIcon />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ))}
+        {/* Header */}
+        <View style={styles.header}>
+          <GlassyTitle title="History" />
+          <Text style={styles.subtitle}>
+            {history.length} generation{history.length !== 1 ? 's' : ''}
+          </Text>
+        </View>
+
+        {/* History Items */}
+        {history.map((item) => (
+          <GlassPanel key={item.id} style={styles.historyItem}>
+            {/* Item Header */}
+            <View style={styles.itemHeader}>
+              <View>
+                <Text style={styles.itemDate}>{item.date}</Text>
+                <Text style={styles.itemTime}>{item.time}</Text>
+              </View>
+              <View style={styles.itemBadge}>
+                <Text style={styles.itemBadgeText}>{item.count} images</Text>
+              </View>
+            </View>
+
+            {/* Thumbnail Grid */}
+            <View style={styles.thumbnailGrid}>
+              {item.results.slice(0, 4).map((imageUri, index) => (
+                <View key={index} style={styles.thumbnailContainer}>
+                  <Image
+                    source={{ uri: imageUri }}
+                    style={styles.thumbnail}
+                    resizeMode="cover"
+                  />
                 </View>
-                
-                <View style={styles.generationInfo}>
-                  <View style={styles.infoLeft}>
-                    <Text style={styles.dateText}>
-                      {new Date(generation.createdAt).toLocaleString()}
-                    </Text>
-                    <Text style={styles.promptText}>{generation.prompt}</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.deleteButton}
-                    onPress={() => handleDelete(generation.id)}
-                  >
-                    <TrashIcon />
-                  </TouchableOpacity>
-                </View>
-              </GlassPanel>
-            ))}
-          </View>
-        )}
+              ))}
+            </View>
+
+            {/* Actions */}
+            <View style={styles.actions}>
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => handleDownload(item.thumbnail)}
+              >
+                <DownloadIcon />
+                <Text style={styles.actionButtonText}>Download</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.deleteButton]}
+                onPress={() => handleDelete(item.id)}
+                disabled={deleting === item.id}
+              >
+                {deleting === item.id ? (
+                  <ActivityIndicator color="#FF5050" size="small" />
+                ) : (
+                  <TrashIcon />
+                )}
+                <Text style={styles.deleteButtonText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </GlassPanel>
+        ))}
       </ScrollView>
     </SafeAreaView>
   );
@@ -216,90 +227,123 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  scrollView: {
-    flex: 1,
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 100,
   },
   loadingContainer: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 40,
-  },
-  messagePanel: {
-    padding: 24,
-  },
-  messageText: {
-    color: '#9CA3AF',
-    textAlign: 'center',
-    fontSize: 14,
-  },
-  errorPanel: {
-    padding: 16,
-    marginBottom: 16,
-  },
-  errorText: {
-    color: '#F87171',
-    textAlign: 'center',
-    fontSize: 14,
-  },
-  historyList: {
-    gap: 24,
-  },
-  generationCard: {
-    padding: 16,
-  },
-  imageGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 16,
-    marginBottom: 16,
-  },
-  imageGridItem: {
-    width: '47%',
-    aspectRatio: 3 / 4,
-    borderRadius: 12,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  historyImage: {
-    width: '100%',
-    height: '100%',
-  },
-  imageOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    opacity: 0,
   },
-  imageButton: {
-    padding: 8,
+  loadingText: {
+    color: '#C8CDD5',
+    fontSize: 14,
+    marginTop: 12,
   },
-  generationInfo: {
+  header: {
+    marginBottom: 24,
+  },
+  subtitle: {
+    color: '#C8CDD5',
+    fontSize: 14,
+    marginTop: 8,
+    fontWeight: '400',
+  },
+  emptyPanel: {
+    paddingHorizontal: 24,
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  emptyText: {
+    color: '#F5F7FA',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  emptySubtext: {
+    color: '#8A92A0',
+    fontSize: 14,
+    fontWeight: '400',
+    textAlign: 'center',
+  },
+  historyItem: {
+    marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  itemHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 12,
   },
-  infoLeft: {
-    flex: 1,
-  },
-  dateText: {
-    color: '#fff',
+  itemDate: {
+    color: '#F5F7FA',
     fontSize: 14,
-    marginBottom: 4,
+    fontWeight: '600',
   },
-  promptText: {
-    color: '#9CA3AF',
+  itemTime: {
+    color: '#8A92A0',
     fontSize: 12,
+    marginTop: 4,
+  },
+  itemBadge: {
+    backgroundColor: 'rgba(10, 118, 175, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  itemBadgeText: {
+    color: '#0A76AF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  thumbnailGrid: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  thumbnailContainer: {
+    flex: 1,
+    aspectRatio: 3 / 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  thumbnail: {
+    width: '100%',
+    height: '100%',
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
   },
   deleteButton: {
-    padding: 8,
+    borderColor: 'rgba(255, 80, 80, 0.2)',
+  },
+  actionButtonText: {
+    color: '#F5F7FA',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  deleteButtonText: {
+    color: '#FF5050',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });
 

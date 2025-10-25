@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import GlassyTitle from '../components/GlassyTitle';
@@ -7,16 +7,26 @@ import GlassPanel from '../components/GlassPanel';
 import CountSelector from '../components/CountSelector';
 import ImageUploader from '../components/ImageUploader';
 import { glassStyles } from '../styles/glassStyles';
+import { useGenerationStore } from '../store/generationStore';
+import { useAuthStore } from '../store/authStore';
+import { generationService } from '../services/generationService';
 
 /**
  * HomeScreen - Main screen for image upload and generation
  */
 export default function HomeScreen() {
-  const [selectedCount, setSelectedCount] = useState(1);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Get stores
+  const selectedCount = useGenerationStore((state) => state.selectedCount);
+  const setSelectedCount = useGenerationStore((state) => state.setSelectedCount);
+  const isGenerating = useGenerationStore((state) => state.isGenerating);
+  const setGenerating = useGenerationStore((state) => state.setGenerating);
+  const setResults = useGenerationStore((state) => state.setResults);
+  const setProgress = useGenerationStore((state) => state.setProgress);
+  const user = useAuthStore((state) => state.user);
 
   // Get greeting based on time of day
   const getGreeting = () => {
@@ -52,76 +62,125 @@ export default function HomeScreen() {
         setUploading(false);
       }
     } catch (err) {
-      setError('Failed to upload image. Please try again.');
+      console.error('Error selecting image:', err);
+      setError('Failed to select image');
       setUploading(false);
     }
   };
 
-  // Handle generate button press
+  // Handle image generation
   const handleGenerate = async () => {
     if (!uploadedImage) {
-      Alert.alert('No Image', 'Please upload an image first.');
+      Alert.alert('No Image', 'Please select an image first');
       return;
     }
 
-    setGenerating(true);
-    setError(null);
+    if (!user) {
+      Alert.alert('Not Authenticated', 'Please log in to generate images');
+      return;
+    }
 
     try {
-      // TODO: Implement API call to generate images
-      // For now, just simulate a delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      Alert.alert('Success', 'Generation started! Check the Results tab.');
-      setGenerating(false);
-    } catch (err) {
-      setError('Failed to generate images. Please try again.');
+      setGenerating(true);
+      setError(null);
+      setProgress(0);
+
+      // Call the generation service
+      const response = await generationService.generateImages(
+        uploadedImage,
+        selectedCount,
+        user.id
+      );
+
+      // Convert response to results format
+      const results = response.images.map((imageUri, index) => ({
+        id: `${response.historyId}-${index}`,
+        imageUri,
+        createdAt: new Date().toISOString(),
+      }));
+
+      setResults(results);
+      setProgress(100);
+
+      // Show success message
+      Alert.alert('Success', `Generated ${selectedCount} images successfully!`);
+
+      // Clear the uploaded image
+      setUploadedImage(null);
+    } catch (err: any) {
+      console.error('Error generating images:', err);
+      setError(err.message || 'Failed to generate images');
+      Alert.alert('Generation Failed', err.message || 'Failed to generate images');
+    } finally {
       setGenerating(false);
     }
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={glassStyles.screenContent}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <GlassyTitle>
-          {getGreeting()}, Muse
-        </GlassyTitle>
-        
-        <CountSelector
-          value={selectedCount}
-          onChange={setSelectedCount}
-          disabled={generating}
-        />
-        
-        <ImageUploader
-          uploadedImage={uploadedImage}
-          uploading={uploading}
-          onImageSelect={handleImageSelect}
-        />
-        
+        {/* Header */}
+        <View style={styles.header}>
+          <GlassyTitle title={`${getGreeting()}!`} />
+          <Text style={styles.subtitle}>Create stunning fashion photos</Text>
+        </View>
+
+        {/* Error Message */}
+        {error && (
+          <GlassPanel style={styles.errorPanel}>
+            <Text style={styles.errorText}>{error}</Text>
+          </GlassPanel>
+        )}
+
+        {/* Image Upload Section */}
+        <GlassPanel style={styles.uploadSection}>
+          <Text style={styles.sectionTitle}>Upload Photo</Text>
+          <ImageUploader
+            image={uploadedImage}
+            onSelect={handleImageSelect}
+            loading={uploading}
+          />
+        </GlassPanel>
+
+        {/* Count Selector Section */}
+        <GlassPanel style={styles.countSection}>
+          <Text style={styles.sectionTitle}>Number of Variations</Text>
+          <CountSelector
+            selected={selectedCount}
+            onSelect={setSelectedCount}
+            disabled={isGenerating}
+          />
+        </GlassPanel>
+
+        {/* Generate Button */}
         <TouchableOpacity
           style={[
-            glassStyles.glass3DButton,
-            glassStyles.primaryButton,
             styles.generateButton,
-            (generating || !uploadedImage) && styles.disabledButton,
+            (isGenerating || !uploadedImage) && styles.generateButtonDisabled,
           ]}
           onPress={handleGenerate}
-          disabled={generating || !uploadedImage}
-          activeOpacity={0.7}
+          disabled={isGenerating || !uploadedImage}
         >
-          <Text style={[glassStyles.buttonText, glassStyles.primaryButtonText]}>
-            {generating ? 'Generating...' : 'Generate Photoshoot'}
-          </Text>
+          {isGenerating ? (
+            <>
+              <ActivityIndicator color="#F5F7FA" size="small" />
+              <Text style={styles.generateButtonText}>Generating...</Text>
+            </>
+          ) : (
+            <Text style={styles.generateButtonText}>Generate Images</Text>
+          )}
         </TouchableOpacity>
-        
-        {error && (
-          <GlassPanel style={styles.errorPanel} radius={16}>
-            <Text style={styles.errorText}>{error}</Text>
+
+        {/* Progress Indicator */}
+        {isGenerating && (
+          <GlassPanel style={styles.progressPanel}>
+            <Text style={styles.progressText}>Processing your images...</Text>
+            <View style={styles.progressBar}>
+              <View style={[styles.progressFill, { width: '50%' }]} />
+            </View>
           </GlassPanel>
         )}
       </ScrollView>
@@ -133,24 +192,87 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  scrollView: {
-    flex: 1,
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 100,
   },
-  generateButton: {
-    width: '100%',
+  header: {
+    marginBottom: 32,
   },
-  disabledButton: {
-    opacity: 0.5,
+  subtitle: {
+    color: '#C8CDD5',
+    fontSize: 14,
+    marginTop: 8,
+    fontWeight: '400',
   },
   errorPanel: {
-    width: '100%',
-    marginTop: 12,
-    padding: 12,
+    marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(255, 100, 100, 0.1)',
   },
   errorText: {
-    color: '#F87171',
-    textAlign: 'center',
+    color: '#FF6464',
     fontSize: 12,
+    fontWeight: '500',
+  },
+  uploadSection: {
+    marginBottom: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+  },
+  countSection: {
+    marginBottom: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+  },
+  sectionTitle: {
+    color: '#F5F7FA',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 16,
+  },
+  generateButton: {
+    backgroundColor: '#0A76AF',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  generateButtonDisabled: {
+    backgroundColor: '#004b93',
+    opacity: 0.6,
+  },
+  generateButtonText: {
+    color: '#F5F7FA',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  progressPanel: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  progressText: {
+    color: '#F5F7FA',
+    fontSize: 14,
+    marginBottom: 12,
+    fontWeight: '500',
+  },
+  progressBar: {
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#0A76AF',
+    borderRadius: 2,
   },
 });
 

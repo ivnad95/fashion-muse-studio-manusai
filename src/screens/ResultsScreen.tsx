@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, Image, TouchableOpacity, ScrollView, StyleSheet, Modal, Dimensions } from 'react-native';
+import { View, Text, Image, TouchableOpacity, ScrollView, StyleSheet, Modal, Dimensions, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import GlassyTitle from '../components/GlassyTitle';
 import GlassPanel from '../components/GlassPanel';
 import { glassStyles, COLORS } from '../styles/glassStyles';
+import { useGenerationStore } from '../store/generationStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -35,96 +36,147 @@ const CheckCircleIcon = () => (
  * ResultsScreen - Display generation results in a grid
  */
 export default function ResultsScreen() {
-  const [results, setResults] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
+  const [downloading, setDownloading] = useState<string | null>(null);
 
-  // Mock data for demonstration
-  const mockResults = [
-    'https://via.placeholder.com/300x400/002857/FFFFFF?text=Result+1',
-    'https://via.placeholder.com/300x400/004b93/FFFFFF?text=Result+2',
-    'https://via.placeholder.com/300x400/002857/FFFFFF?text=Result+3',
-    'https://via.placeholder.com/300x400/004b93/FFFFFF?text=Result+4',
-  ];
+  // Get results from store
+  const results = useGenerationStore((state) => state.results);
+  const isGenerating = useGenerationStore((state) => state.isGenerating);
+  const generationProgress = useGenerationStore((state) => state.generationProgress);
 
-  const displayImages = results.length > 0 ? results : mockResults;
-  const allImagesReady = results.length > 0;
-
-  const handleDownload = (imageUrl: string) => {
-    // TODO: Implement download functionality
-    console.log('Download:', imageUrl);
+  // Handle image view
+  const handleViewImage = (imageUri: string) => {
+    setSelectedImage(imageUri);
   };
+
+  // Handle image download
+  const handleDownload = async (imageUri: string) => {
+    try {
+      setDownloading(imageUri);
+      // TODO: Implement actual download functionality
+      // For now, just simulate a download
+      setTimeout(() => {
+        setDownloading(null);
+      }, 2000);
+    } catch (error) {
+      console.error('Error downloading image:', error);
+      setDownloading(null);
+    }
+  };
+
+  // Empty state
+  if (results.length === 0 && !isGenerating) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <GlassyTitle title="Results" />
+            <Text style={styles.subtitle}>Your generated images will appear here</Text>
+          </View>
+
+          <GlassPanel style={styles.emptyPanel}>
+            <Text style={styles.emptyText}>No images generated yet</Text>
+            <Text style={styles.emptySubtext}>
+              Go to Home and upload a photo to get started
+            </Text>
+          </GlassPanel>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={glassStyles.screenContent}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <GlassyTitle>Results</GlassyTitle>
-        
-        {loading && (
-          <GlassPanel style={styles.progressPanel} radius={20}>
+        {/* Header */}
+        <View style={styles.header}>
+          <GlassyTitle title="Results" />
+          <Text style={styles.subtitle}>
+            {results.length} image{results.length !== 1 ? 's' : ''} generated
+          </Text>
+        </View>
+
+        {/* Progress Indicator */}
+        {isGenerating && (
+          <GlassPanel style={styles.progressPanel}>
+            <ActivityIndicator color="#0A76AF" size="large" />
+            <Text style={styles.progressText}>Generating images...</Text>
             <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${progress}%` }]} />
+              <View style={[styles.progressFill, { width: `${generationProgress}%` }]} />
             </View>
-            <Text style={styles.progressText}>{progress}% Complete</Text>
+            <Text style={styles.progressPercentage}>{generationProgress}%</Text>
           </GlassPanel>
         )}
-        
+
+        {/* Results Grid */}
         <View style={styles.grid}>
-          {displayImages.map((img, i) => (
-            <GlassPanel key={i} style={styles.gridItem} radius={20}>
-              <View style={styles.imageWrapper}>
+          {results.map((result, index) => (
+            <View key={result.id} style={styles.gridItem}>
+              <TouchableOpacity
+                style={styles.imageContainer}
+                onPress={() => handleViewImage(result.imageUri)}
+              >
                 <Image
-                  source={{ uri: img }}
-                  style={styles.resultImage}
+                  source={{ uri: result.imageUri }}
+                  style={styles.image}
                   resizeMode="cover"
                 />
-                <View style={styles.overlay}>
-                  <TouchableOpacity
-                    style={styles.overlayButton}
-                    onPress={() => setSelectedImage(img)}
-                  >
-                    <EyeIcon />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.overlayButton}
-                    onPress={() => handleDownload(img)}
-                  >
-                    <DownloadIcon />
-                  </TouchableOpacity>
+                <View style={styles.imageOverlay}>
+                  <EyeIcon />
                 </View>
+              </TouchableOpacity>
+
+              {/* Action Buttons */}
+              <View style={styles.actions}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => handleViewImage(result.imageUri)}
+                >
+                  <EyeIcon />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.actionButton,
+                    downloading === result.imageUri && styles.actionButtonActive,
+                  ]}
+                  onPress={() => handleDownload(result.imageUri)}
+                  disabled={downloading === result.imageUri}
+                >
+                  {downloading === result.imageUri ? (
+                    <ActivityIndicator color="#0A76AF" size="small" />
+                  ) : (
+                    <DownloadIcon />
+                  )}
+                </TouchableOpacity>
               </View>
-            </GlassPanel>
+
+              {/* Success Indicator */}
+              <View style={styles.successIndicator}>
+                <CheckCircleIcon />
+              </View>
+            </View>
           ))}
         </View>
-        
-        {!loading && allImagesReady && (
-          <GlassPanel style={styles.successPanel} radius={20}>
-            <View style={styles.successContent}>
-              <CheckCircleIcon />
-              <Text style={styles.successText}>Your fashion photos are ready!</Text>
-            </View>
-          </GlassPanel>
-        )}
       </ScrollView>
 
-      {/* Lightbox Modal */}
+      {/* Image Modal */}
       <Modal
-        visible={selectedImage !== null}
+        visible={!!selectedImage}
         transparent={true}
         animationType="fade"
         onRequestClose={() => setSelectedImage(null)}
       >
-        <TouchableOpacity 
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setSelectedImage(null)}
-        >
-          <View style={styles.modalContent}>
+        <View style={styles.modalContainer}>
+          <TouchableOpacity
+            style={styles.modalBackground}
+            onPress={() => setSelectedImage(null)}
+          >
             {selectedImage && (
               <Image
                 source={{ uri: selectedImage }}
@@ -132,8 +184,8 @@ export default function ResultsScreen() {
                 resizeMode="contain"
               />
             )}
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -143,91 +195,138 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  scrollView: {
-    flex: 1,
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 100,
+  },
+  header: {
+    marginBottom: 24,
+  },
+  subtitle: {
+    color: '#C8CDD5',
+    fontSize: 14,
+    marginTop: 8,
+    fontWeight: '400',
+  },
+  emptyPanel: {
+    paddingHorizontal: 24,
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  emptyText: {
+    color: '#F5F7FA',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  emptySubtext: {
+    color: '#8A92A0',
+    fontSize: 14,
+    fontWeight: '400',
+    textAlign: 'center',
   },
   progressPanel: {
-    padding: 16,
-    marginBottom: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  progressText: {
+    color: '#F5F7FA',
+    fontSize: 14,
+    marginTop: 12,
+    marginBottom: 12,
+    fontWeight: '500',
   },
   progressBar: {
-    height: 8,
+    width: '100%',
+    height: 4,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 4,
+    borderRadius: 2,
     overflow: 'hidden',
     marginBottom: 8,
   },
   progressFill: {
     height: '100%',
-    backgroundColor: COLORS.lightColor3,
+    backgroundColor: '#0A76AF',
+    borderRadius: 2,
   },
-  progressText: {
-    color: COLORS.silverMid,
-    fontSize: 14,
-    textAlign: 'center',
+  progressPercentage: {
+    color: '#0A76AF',
+    fontSize: 12,
+    fontWeight: '600',
   },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 16,
-    marginBottom: 16,
+    justifyContent: 'space-between',
   },
   gridItem: {
-    width: (SCREEN_WIDTH - 56) / 2,
+    width: '48%',
+    marginBottom: 16,
+  },
+  imageContainer: {
+    width: '100%',
     aspectRatio: 3 / 4,
-  },
-  imageWrapper: {
-    flex: 1,
-    borderRadius: 20,
+    borderRadius: 16,
     overflow: 'hidden',
+    marginBottom: 8,
+    position: 'relative',
   },
-  resultImage: {
+  image: {
     width: '100%',
     height: '100%',
   },
-  overlay: {
+  imageOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    flexDirection: 'row',
-    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
     justifyContent: 'center',
-    gap: 16,
+    alignItems: 'center',
     opacity: 0,
   },
-  overlayButton: {
-    padding: 8,
-  },
-  successPanel: {
-    padding: 16,
-  },
-  successContent: {
+  actions: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     gap: 8,
   },
-  successText: {
-    color: '#4ADE80',
-    fontSize: 14,
-    fontWeight: '500',
+  actionButton: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  modalOverlay: {
+  actionButtonActive: {
+    backgroundColor: 'rgba(10, 118, 175, 0.2)',
+    borderColor: '#0A76AF',
+  },
+  successIndicator: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+  },
+  modalContainer: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.9)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalContent: {
-    width: '90%',
-    height: '80%',
+  modalBackground: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   modalImage: {
-    width: '100%',
-    height: '100%',
+    width: SCREEN_WIDTH * 0.9,
+    height: SCREEN_WIDTH * 0.9 * 1.33,
   },
 });
 

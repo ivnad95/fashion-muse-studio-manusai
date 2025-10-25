@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Switch, Image } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Switch, Image, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import GlassyTitle from '../components/GlassyTitle';
 import GlassPanel from '../components/GlassPanel';
 import { glassStyles, COLORS } from '../styles/glassStyles';
+import { useAuthStore } from '../store/authStore';
+import { authService } from '../services/authService';
 
 // Google Icon
 const GoogleIcon = () => (
@@ -16,237 +18,297 @@ const GoogleIcon = () => (
   </Svg>
 );
 
+const LogoutIcon = () => (
+  <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FF5050" strokeWidth="2">
+    <Path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <polyline points="16 17 21 12 16 7" />
+    <line x1="21" y1="12" x2="9" y2="12" />
+  </Svg>
+);
+
 /**
  * SettingsScreen - User settings and configuration
  */
 export default function SettingsScreen() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [profileName, setProfileName] = useState('Muse');
-  const [email, setEmail] = useState('');
-  const [profileImage, setProfileImage] = useState<string | null>(null);
   const [geminiApiKey, setGeminiApiKey] = useState('');
-  const [hasStoredKey, setHasStoredKey] = useState(false);
   const [aspectRatio, setAspectRatio] = useState('portrait');
   const [blurStrength, setBlurStrength] = useState(24);
   const [notifications, setNotifications] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleSignIn = () => {
-    // TODO: Implement Google Sign In
-    console.log('Sign in with Google');
+  // Get auth state
+  const user = useAuthStore((state) => state.user);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+
+  // Load settings on mount
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      loadSettings();
+    }
+  }, [isAuthenticated, user]);
+
+  // Load user settings from backend
+  const loadSettings = async () => {
+    try {
+      const profile = await authService.getProfile();
+      if (profile.settings) {
+        setGeminiApiKey(profile.settings.geminiApiKey || '');
+        setAspectRatio(profile.settings.aspectRatio || 'portrait');
+        setBlurStrength(profile.settings.blurStrength || 24);
+        setNotifications(profile.settings.notifications !== false);
+      }
+    } catch (error) {
+      console.error('Error loading settings:', error);
+    }
   };
 
-  const handleSignOut = () => {
-    setIsAuthenticated(false);
-    setProfileName('Muse');
-    setEmail('');
-    setProfileImage(null);
-    setGeminiApiKey('');
-    setHasStoredKey(false);
+  // Handle sign out
+  const handleSignOut = async () => {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', onPress: () => {}, style: 'cancel' },
+      {
+        text: 'Sign Out',
+        onPress: async () => {
+          try {
+            setLoading(true);
+            await authService.signOut();
+            Alert.alert('Success', 'Signed out successfully');
+          } catch (error: any) {
+            Alert.alert('Error', error.message || 'Failed to sign out');
+          } finally {
+            setLoading(false);
+          }
+        },
+        style: 'destructive',
+      },
+    ]);
   };
 
-  const handleSaveSettings = () => {
-    // TODO: Implement save settings API call
-    setStatusMessage('Settings saved successfully!');
-    setTimeout(() => setStatusMessage(null), 3000);
+  // Handle save settings
+  const handleSaveSettings = async () => {
+    if (!user) return;
+
+    try {
+      setLoading(true);
+      await authService.updateProfile({
+        settings: {
+          geminiApiKey,
+          aspectRatio,
+          blurStrength,
+          notifications,
+        },
+      });
+      setStatusMessage('Settings saved successfully!');
+      setTimeout(() => setStatusMessage(null), 3000);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to save settings');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleRemoveKey = () => {
-    setGeminiApiKey('');
-    setHasStoredKey(false);
-    setStatusMessage('Gemini API key removed from your account.');
-    setTimeout(() => setStatusMessage(null), 3000);
+  // Handle remove API key
+  const handleRemoveKey = async () => {
+    Alert.alert(
+      'Remove API Key',
+      'Are you sure you want to remove your Gemini API key?',
+      [
+        { text: 'Cancel', onPress: () => {}, style: 'cancel' },
+        {
+          text: 'Remove',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              setGeminiApiKey('');
+              await handleSaveSettings();
+              setStatusMessage('Gemini API key removed from your account.');
+              setTimeout(() => setStatusMessage(null), 3000);
+            } catch (error: any) {
+              Alert.alert('Error', error.message || 'Failed to remove API key');
+            } finally {
+              setLoading(false);
+            }
+          },
+          style: 'destructive',
+        },
+      ]
+    );
   };
+
+  // Not authenticated state
+  if (!isAuthenticated) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <GlassyTitle title="Settings" />
+            <Text style={styles.subtitle}>Sign in to access settings</Text>
+          </View>
+
+          <GlassPanel style={styles.section}>
+            <Text style={styles.sectionTitle}>Account & Authentication</Text>
+            <Text style={styles.description}>
+              Sign in with your account to access all features and save your preferences.
+            </Text>
+            <TouchableOpacity style={styles.signInButton}>
+              <GoogleIcon />
+              <Text style={styles.signInButtonText}>Sign In with Google</Text>
+            </TouchableOpacity>
+          </GlassPanel>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={glassStyles.screenContent}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <GlassyTitle>Settings</GlassyTitle>
-        
-        {/* Authentication Section */}
-        <GlassPanel style={styles.section} radius={24}>
-          <Text style={styles.sectionTitle}>Account & Authentication</Text>
-          
-          {isAuthenticated ? (
-            <View style={styles.authContent}>
-              <View style={styles.profileRow}>
-                {profileImage ? (
-                  <Image 
-                    source={{ uri: profileImage }}
-                    style={styles.profileImage}
-                  />
-                ) : (
-                  <View style={styles.profilePlaceholder}>
-                    <Text style={styles.profileInitial}>
-                      {profileName.charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-                )}
-                <View style={styles.profileInfo}>
-                  <Text style={styles.profileName}>{profileName}</Text>
-                  <Text style={styles.profileEmail}>{email}</Text>
-                </View>
-              </View>
-              
-              <View style={[
-                styles.statusBanner,
-                hasStoredKey ? styles.successBanner : styles.warningBanner
-              ]}>
-                <Text style={[
-                  styles.statusText,
-                  hasStoredKey ? styles.successText : styles.warningText
-                ]}>
-                  {hasStoredKey
-                    ? '✓ Gemini API key is securely stored. Generations will use your Google account automatically.'
-                    : 'Add your Gemini API key below so generations can run under your Google account.'}
-                </Text>
-                {hasStoredKey && (
-                  <TouchableOpacity onPress={handleRemoveKey}>
-                    <Text style={styles.removeKeyText}>Remove stored Gemini API key</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-              
-              <TouchableOpacity
-                style={[glassStyles.glass3DButton, glassStyles.deleteButton, styles.signOutButton]}
-                onPress={handleSignOut}
-              >
-                <Text style={glassStyles.deleteButtonText}>Sign Out</Text>
-              </TouchableOpacity>
+        {/* Header */}
+        <View style={styles.header}>
+          <GlassyTitle title="Settings" />
+          <Text style={styles.subtitle}>Manage your preferences</Text>
+        </View>
+
+        {/* Status Message */}
+        {statusMessage && (
+          <GlassPanel style={styles.successPanel}>
+            <Text style={styles.successText}>{statusMessage}</Text>
+          </GlassPanel>
+        )}
+
+        {/* Profile Section */}
+        <GlassPanel style={styles.section}>
+          <Text style={styles.sectionTitle}>Profile</Text>
+          <View style={styles.profileInfo}>
+            <View>
+              <Text style={styles.profileName}>{user?.name || 'User'}</Text>
+              <Text style={styles.profileEmail}>{user?.email}</Text>
             </View>
-          ) : (
-            <View style={styles.authContent}>
-              <View style={styles.statusBanner}>
-                <Text style={styles.warningText}>
-                  Sign in with Google to automatically use your Gemini API key
-                </Text>
-                <Text style={styles.subText}>
-                  No manual API key configuration needed
-                </Text>
+            {user?.credits !== undefined && (
+              <View style={styles.creditsBadge}>
+                <Text style={styles.creditsText}>{user.credits} credits</Text>
               </View>
-              
-              <TouchableOpacity
-                style={[glassStyles.glass3DButton, glassStyles.primaryButton, styles.signInButton]}
-                onPress={handleSignIn}
-              >
-                <GoogleIcon />
-                <Text style={[glassStyles.buttonText, { marginLeft: 8 }]}>
-                  Sign in with Google
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
+            )}
+          </View>
         </GlassPanel>
 
-        {/* Gemini API Key Section */}
-        <GlassPanel style={styles.section} radius={24}>
-          <Text style={styles.sectionTitle}>Gemini API Key Configuration</Text>
+        {/* API Configuration Section */}
+        <GlassPanel style={styles.section}>
+          <Text style={styles.sectionTitle}>API Configuration</Text>
           
-          <Text style={styles.description}>
-            {isAuthenticated
-              ? `Provide the Gemini API key associated with ${email}. We store it securely and use it automatically for generations.`
-              : 'Not signed in? Paste your Gemini API key below so we can run generations on your behalf. You can create one at makersuite.google.com/app/apikey.'}
-          </Text>
-          
-          {isAuthenticated && hasStoredKey && (
-            <Text style={styles.infoText}>
-              A key is already stored. Leave the field blank to keep it, or paste a new key to replace it.
-            </Text>
-          )}
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Gemini API Key</Text>
+          <View style={styles.settingGroup}>
+            <Text style={styles.settingLabel}>Gemini API Key</Text>
             <TextInput
               style={styles.input}
               placeholder="Enter your Gemini API key"
-              placeholderTextColor="#6B7280"
+              placeholderTextColor="#8A92A0"
               value={geminiApiKey}
               onChangeText={setGeminiApiKey}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
+              secureTextEntry={true}
+              editable={!loading}
             />
+            {geminiApiKey && (
+              <TouchableOpacity
+                style={styles.removeButton}
+                onPress={handleRemoveKey}
+                disabled={loading}
+              >
+                <Text style={styles.removeButtonText}>Remove Key</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </GlassPanel>
 
-        {/* App Preferences Section */}
-        <GlassPanel style={styles.section} radius={24}>
-          <Text style={styles.sectionTitle}>App Preferences</Text>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Display Name</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your name"
-              placeholderTextColor="#6B7280"
-              value={profileName}
-              onChangeText={setProfileName}
-            />
-          </View>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Aspect Ratio</Text>
-            <View style={styles.pickerContainer}>
-              {['portrait', 'square', 'landscape'].map((ratio) => (
+        {/* Preferences Section */}
+        <GlassPanel style={styles.section}>
+          <Text style={styles.sectionTitle}>Preferences</Text>
+
+          {/* Aspect Ratio */}
+          <View style={styles.settingGroup}>
+            <Text style={styles.settingLabel}>Image Aspect Ratio</Text>
+            <View style={styles.optionGroup}>
+              {['portrait', 'landscape', 'square'].map((option) => (
                 <TouchableOpacity
-                  key={ratio}
+                  key={option}
                   style={[
-                    styles.pickerOption,
-                    aspectRatio === ratio && styles.pickerOptionActive
+                    styles.optionButton,
+                    aspectRatio === option && styles.optionButtonActive,
                   ]}
-                  onPress={() => setAspectRatio(ratio)}
+                  onPress={() => setAspectRatio(option)}
+                  disabled={loading}
                 >
-                  <Text style={[
-                    styles.pickerText,
-                    aspectRatio === ratio && styles.pickerTextActive
-                  ]}>
-                    {ratio.charAt(0).toUpperCase() + ratio.slice(1)}
+                  <Text
+                    style={[
+                      styles.optionButtonText,
+                      aspectRatio === option && styles.optionButtonTextActive,
+                    ]}
+                  >
+                    {option.charAt(0).toUpperCase() + option.slice(1)}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
           </View>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Glass Blur ({blurStrength}px)</Text>
+
+          {/* Blur Strength */}
+          <View style={styles.settingGroup}>
+            <Text style={styles.settingLabel}>UI Blur Strength</Text>
             <View style={styles.sliderContainer}>
-              <Text style={styles.sliderValue}>10</Text>
+              <Text style={styles.sliderValue}>{blurStrength}</Text>
               <View style={styles.slider}>
-                <View style={[styles.sliderTrack, { width: `${((blurStrength - 10) / 40) * 100}%` }]} />
+                <View
+                  style={[
+                    styles.sliderFill,
+                    { width: `${(blurStrength / 50) * 100}%` },
+                  ]}
+                />
               </View>
-              <Text style={styles.sliderValue}>50</Text>
             </View>
           </View>
-          
-          <View style={styles.switchRow}>
-            <Text style={styles.label}>Notifications</Text>
-            <Switch
-              value={notifications}
-              onValueChange={setNotifications}
-              trackColor={{ false: '#374151', true: COLORS.lightColor3 }}
-              thumbColor={notifications ? COLORS.silverLight : '#9CA3AF'}
-            />
+
+          {/* Notifications */}
+          <View style={styles.settingGroup}>
+            <View style={styles.notificationRow}>
+              <Text style={styles.settingLabel}>Notifications</Text>
+              <Switch
+                value={notifications}
+                onValueChange={setNotifications}
+                disabled={loading}
+                trackColor={{ false: '#8A92A0', true: '#0A76AF' }}
+              />
+            </View>
           </View>
-          
-          <TouchableOpacity
-            style={[glassStyles.glass3DButton, glassStyles.primaryButton, styles.saveButton]}
-            onPress={handleSaveSettings}
-          >
-            <Text style={[glassStyles.buttonText, glassStyles.primaryButtonText]}>
-              Save Settings
-            </Text>
-          </TouchableOpacity>
         </GlassPanel>
 
-        {statusMessage && (
-          <GlassPanel style={styles.statusMessagePanel} radius={16}>
-            <Text style={styles.statusMessageText}>{statusMessage}</Text>
-          </GlassPanel>
-        )}
+        {/* Save Button */}
+        <TouchableOpacity
+          style={[styles.saveButton, loading && styles.saveButtonDisabled]}
+          onPress={handleSaveSettings}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#F5F7FA" size="small" />
+          ) : (
+            <Text style={styles.saveButtonText}>Save Settings</Text>
+          )}
+        </TouchableOpacity>
+
+        {/* Sign Out Button */}
+        <TouchableOpacity
+          style={styles.signOutButton}
+          onPress={handleSignOut}
+          disabled={loading}
+        >
+          <LogoutIcon />
+          <Text style={styles.signOutButtonText}>Sign Out</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -256,188 +318,206 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  scrollView: {
-    flex: 1,
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 100,
   },
-  section: {
-    padding: 16,
+  header: {
     marginBottom: 24,
   },
-  sectionTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+  subtitle: {
+    color: '#C8CDD5',
+    fontSize: 14,
+    marginTop: 8,
+    fontWeight: '400',
+  },
+  successPanel: {
     marginBottom: 16,
-  },
-  authContent: {
-    gap: 16,
-  },
-  profileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  profileImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-  },
-  profilePlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#374151',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-  },
-  profileInitial: {
-    color: '#9CA3AF',
-    fontSize: 32,
-    fontWeight: '600',
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  profileName: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  profileEmail: {
-    color: '#9CA3AF',
-    fontSize: 14,
-  },
-  statusBanner: {
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  successBanner: {
-    backgroundColor: 'rgba(34, 197, 94, 0.2)',
-    borderColor: 'rgba(34, 197, 94, 0.5)',
-  },
-  warningBanner: {
-    backgroundColor: 'rgba(234, 179, 8, 0.2)',
-    borderColor: 'rgba(234, 179, 8, 0.5)',
-  },
-  statusText: {
-    fontSize: 14,
-    marginBottom: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(74, 222, 128, 0.1)',
   },
   successText: {
     color: '#4ADE80',
-  },
-  warningText: {
-    color: '#FBBF24',
-  },
-  subText: {
-    color: '#9CA3AF',
     fontSize: 12,
+    fontWeight: '500',
   },
-  removeKeyText: {
-    color: '#FCA5A5',
-    fontSize: 12,
-    textDecorationLine: 'underline',
+  section: {
+    marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
-  signInButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  signOutButton: {
-    width: '100%',
-    height: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
+  sectionTitle: {
+    color: '#F5F7FA',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
   },
   description: {
-    color: '#9CA3AF',
+    color: '#C8CDD5',
     fontSize: 14,
-    marginBottom: 12,
+    marginBottom: 16,
+    lineHeight: 20,
   },
-  infoText: {
-    color: '#86EFAC',
+  profileInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  profileName: {
+    color: '#F5F7FA',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  profileEmail: {
+    color: '#8A92A0',
     fontSize: 12,
-    marginBottom: 12,
+    marginTop: 4,
   },
-  inputGroup: {
+  creditsBadge: {
+    backgroundColor: 'rgba(10, 118, 175, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  creditsText: {
+    color: '#0A76AF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  settingGroup: {
     marginBottom: 16,
   },
-  label: {
-    color: 'rgba(255, 255, 255, 0.8)',
+  settingLabel: {
+    color: '#F5F7FA',
     fontSize: 14,
+    fontWeight: '600',
     marginBottom: 8,
   },
   input: {
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 8,
-    padding: 12,
-    color: '#1F2937',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#F5F7FA',
     fontSize: 14,
+    marginBottom: 8,
   },
-  pickerContainer: {
+  removeButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255, 80, 80, 0.1)',
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  removeButtonText: {
+    color: '#FF5050',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  optionGroup: {
     flexDirection: 'row',
     gap: 8,
   },
-  pickerOption: {
+  optionButton: {
     flex: 1,
-    padding: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
   },
-  pickerOptionActive: {
-    backgroundColor: COLORS.lightColor3,
+  optionButtonActive: {
+    backgroundColor: 'rgba(10, 118, 175, 0.2)',
+    borderColor: '#0A76AF',
   },
-  pickerText: {
-    color: '#9CA3AF',
-    fontSize: 14,
-  },
-  pickerTextActive: {
-    color: '#fff',
+  optionButtonText: {
+    color: '#C8CDD5',
+    fontSize: 12,
     fontWeight: '600',
+  },
+  optionButtonTextActive: {
+    color: '#0A76AF',
   },
   sliderContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
+  sliderValue: {
+    color: '#0A76AF',
+    fontSize: 14,
+    fontWeight: '600',
+    minWidth: 30,
+  },
   slider: {
     flex: 1,
     height: 4,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 2,
+    overflow: 'hidden',
   },
-  sliderTrack: {
+  sliderFill: {
     height: '100%',
-    backgroundColor: COLORS.lightColor3,
+    backgroundColor: '#0A76AF',
     borderRadius: 2,
   },
-  sliderValue: {
-    color: '#9CA3AF',
-    fontSize: 12,
-  },
-  switchRow: {
+  notificationRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+  },
+  signInButton: {
+    flexDirection: 'row',
+    backgroundColor: '#0A76AF',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  signInButtonText: {
+    color: '#F5F7FA',
+    fontSize: 14,
+    fontWeight: '600',
   },
   saveButton: {
-    width: '100%',
+    backgroundColor: '#0A76AF',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 12,
   },
-  statusMessagePanel: {
-    padding: 12,
+  saveButtonDisabled: {
+    opacity: 0.6,
   },
-  statusMessageText: {
-    color: '#4ADE80',
+  saveButtonText: {
+    color: '#F5F7FA',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  signOutButton: {
+    flexDirection: 'row',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 80, 80, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  signOutButtonText: {
+    color: '#FF5050',
     fontSize: 14,
-    textAlign: 'center',
+    fontWeight: '600',
   },
 });
 
